@@ -1,9 +1,10 @@
 import asyncio
-from fastapi import FastAPI, Depends, Query, Request
+from fastapi import FastAPI, Depends, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, Response
+from pydantic import BaseModel
 from sqlalchemy.orm import Session
-from typing import Optional
+from typing import Optional, Any
 import httpx
 from datetime import datetime, timezone
 
@@ -20,33 +21,18 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
     allow_credentials=False,
-    allow_methods=["*"],
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
     allow_headers=["*"],
+    expose_headers=["*"],
 )
-
-
-# Secondary: force CORS headers on every response (covers tunnels & error paths)
-@app.middleware("http")
-async def force_cors(request: Request, call_next):
-    if request.method == "OPTIONS":
-        return Response(
-            status_code=204,
-            headers={
-                "Access-Control-Allow-Origin": "*",
-                "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS, PATCH",
-                "Access-Control-Allow-Headers": "*",
-                "Access-Control-Max-Age": "86400",
-            },
-        )
-    response = await call_next(request)
-    response.headers["Access-Control-Allow-Origin"] = "*"
-    response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS, PATCH"
-    response.headers["Access-Control-Allow-Headers"] = "*"
-    return response
 
 GENDERIZE_URL = "https://api.genderize.io"
 AGIFY_URL = "https://api.agify.io"
 NATIONALIZE_URL = "https://api.nationalize.io"
+
+
+class ProfileCreateRequest(BaseModel):
+    name: Any = None  # Accept any type so we can return 422 for non-strings ourselves
 
 
 def profile_to_dict(profile: models.Profile) -> dict:
@@ -79,17 +65,8 @@ def profile_to_list_dict(profile: models.Profile) -> dict:
 # POST /api/profiles
 # ---------------------------------------------------------------------------
 @app.post("/api/profiles")
-async def create_profile(request: Request, db: Session = Depends(get_db)):
-    # Parse body
-    try:
-        body = await request.json()
-    except Exception:
-        return JSONResponse(
-            status_code=400,
-            content={"status": "error", "message": "Invalid JSON body"},
-        )
-
-    name = body.get("name") if isinstance(body, dict) else None
+async def create_profile(payload: ProfileCreateRequest, db: Session = Depends(get_db)):
+    name = payload.name
 
     # Validate: missing or empty
     if name is None or (isinstance(name, str) and name.strip() == ""):
