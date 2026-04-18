@@ -10,7 +10,7 @@ from datetime import datetime, timezone
 
 from database import engine, get_db
 import models
-from utils import generate_uuid7, classify_age_group
+from Stage1.Backend.utils import generate_uuid7, classify_age_group
 
 # Create tables on startup
 models.Base.metadata.create_all(bind=engine)
