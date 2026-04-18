@@ -134,7 +134,7 @@ Client → Nginx (443) → FastAPI (127.0.0.1:8001)
   * HTTP status `200`
 * API is not publicly exposed on its internal port
 * Service is managed with systemd and auto-restarts on failure
-* Response time is under 500ms
+* Response time is under 500ms for all endpoints
 
 ---
 
