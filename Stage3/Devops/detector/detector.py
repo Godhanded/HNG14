@@ -90,18 +90,21 @@ class AnomalyDetector:
 
         This is called on EVERY log line, so it must be fast (no I/O, no sleeps).
         """
-        # Never block IPs that are on the whitelist (localhost, private ranges, etc.)
-        if self._is_whitelisted(ip):
-            return
+        whitelisted = self._is_whitelisted(ip)
 
         now = time.time()
 
         with self._lock:
             # ── Append to sliding windows ─────────────────────────────────────
-            self._ip_windows[ip].append(now)
+            # Whitelisted IPs (private/Docker ranges) still count toward the global
+            # rate so the dashboard and global anomaly detection stay accurate.
+            # We just skip per-IP tracking and banning for them.
+            if not whitelisted:
+                self._ip_windows[ip].append(now)
             self._global_window.append(now)
             if is_error:
-                self._ip_err_windows[ip].append(now)
+                if not whitelisted:
+                    self._ip_err_windows[ip].append(now)
                 self._global_err_window.append(now)
 
             # ── Evict old timestamps (the "sliding" part of the sliding window) ─
@@ -145,8 +148,11 @@ class AnomalyDetector:
             rate_mult   = self.rate_mult
 
         # ── Per-IP anomaly check ───────────────────────────────────────────────
-        ip_zscore = (ip_rate - mean) / stddev if stddev > 0 else 0.0
-        ip_anomalous = (ip_zscore > z_threshold) or (ip_rate > rate_mult * mean and ip_rate > 1.0)
+        # Skip for whitelisted IPs — they can't be banned, only counted globally.
+        ip_zscore    = (ip_rate - mean) / stddev if stddev > 0 else 0.0
+        ip_anomalous = (not whitelisted) and (
+            (ip_zscore > z_threshold) or (ip_rate > rate_mult * mean and ip_rate > 1.0)
+        )
 
         if ip_anomalous and not already_flagged:
             with self._lock:
