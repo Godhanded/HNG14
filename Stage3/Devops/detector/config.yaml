@@ -1,0 +1,72 @@
+# ─── File Paths ───────────────────────────────────────────────────────────────
+# Path to the Nginx JSON access log (inside the shared Docker volume)
+log_file: /var/log/nginx/hng-access.log
+
+# Where structured audit events (ban/unban/recalc) are written
+audit_log_file: /var/log/detector/audit.log
+
+# General detector log (info, warnings, errors)
+detector_log_file: /var/log/detector/detector.log
+
+# ─── Slack ────────────────────────────────────────────────────────────────────
+# Your Slack incoming webhook URL. Override with the SLACK_WEBHOOK_URL env var.
+# To create one: https://api.slack.com/messaging/webhooks
+slack_webhook_url: "YOUR_SLACK_WEBHOOK_URL"
+
+# ─── Dashboard ────────────────────────────────────────────────────────────────
+# Port the Flask dashboard web server listens on.
+# Your host Nginx should reverse-proxy your monitor subdomain to this port.
+dashboard_port: 8888
+
+# ─── Sliding Window Settings ─────────────────────────────────────────────────
+# How many seconds back each sliding window looks.
+# A deque of timestamps is kept; entries older than this are evicted.
+ip_window_seconds: 60       # Per-IP window: requests from a single IP in the last 60s
+global_window_seconds: 60   # Global window: all requests site-wide in the last 60s
+
+# ─── Baseline Settings ────────────────────────────────────────────────────────
+# The baseline tracks "what does normal traffic look like?" using a rolling
+# 30-minute buffer of per-second request counts.
+baseline_window_minutes: 30          # Rolling window size
+baseline_recalc_interval_seconds: 60 # Recalculate mean/stddev every 60 seconds
+baseline_minimum_mean: 1.0           # Floor value — prevents divide-by-zero at low traffic
+baseline_min_stddev: 0.1             # Floor for stddev
+
+# How many seconds of data the current hour needs before we prefer it over the
+# full 30-minute window. 300 seconds = 5 minutes.
+baseline_hourly_min_samples: 300
+
+# ─── Anomaly Detection Thresholds ─────────────────────────────────────────────
+# These control when an IP or global rate is flagged as anomalous.
+# Both checks run independently — whichever fires first triggers the alert.
+
+# Z-score threshold: how many standard deviations above the mean is "anomalous"
+# z = (current_rate - mean) / stddev  →  flag if z > 3.0
+z_score_threshold: 3.0
+
+# Rate multiplier: flag if current_rate > N * baseline_mean
+# This catches anomalies even when stddev is very small (e.g. nearly flat traffic)
+rate_multiplier_threshold: 5.0
+
+# Error surge: if an IP's error (4xx/5xx) rate is this many times the baseline
+# error rate, tighten the detection thresholds by 30% for that IP
+error_rate_multiplier: 3.0
+
+# ─── Ban / Unban Schedule ─────────────────────────────────────────────────────
+# Progressive ban durations in seconds: 10 min → 30 min → 2 hours → permanent
+# After the third ban, the IP is never automatically unbanned.
+unban_schedule_seconds:
+  - 600     # 10 minutes (1st ban)
+  - 1800    # 30 minutes (2nd ban)
+  - 7200    # 2 hours    (3rd ban)
+  # 4th ban onwards = permanent (no entry in this list)
+
+# ─── IP Whitelist ─────────────────────────────────────────────────────────────
+# These IPs will never be blocked, no matter what their traffic looks like.
+# Always include localhost and private ranges to avoid blocking your own servers.
+whitelisted_ips:
+  - "127.0.0.1"
+  - "::1"
+  - "10.0.0.0/8"
+  - "172.16.0.0/12"
+  - "192.168.0.0/16"

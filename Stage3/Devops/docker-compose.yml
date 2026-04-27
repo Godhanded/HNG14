@@ -1,0 +1,80 @@
+version: '3.8'
+
+# ─── Named Volumes ────────────────────────────────────────────────────────────
+# Docker volumes persist data across container restarts.
+# HNG-nginx-logs is the key shared volume: nginx writes to it, the detector reads from it.
+volumes:
+  HNG-nginx-logs:        # Nginx writes JSON access logs here; detector reads them
+    driver: local
+  nextcloud-data:        # Nextcloud's uploaded files
+  db-data:               # MariaDB database files
+
+services:
+
+  # ─── Database (MariaDB) ────────────────────────────────────────────────────
+  # Nextcloud needs a database to store metadata, users, settings, etc.
+  db:
+    image: mariadb:10.6
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${DB_ROOT_PASSWORD:-changeme}
+      MYSQL_DATABASE: nextcloud
+      MYSQL_USER: nextcloud
+      MYSQL_PASSWORD: ${DB_PASSWORD:-changeme}
+    volumes:
+      - db-data:/var/lib/mysql
+
+  # ─── Nextcloud ─────────────────────────────────────────────────────────────
+  # Pre-built image from the task — DO NOT change this image.
+  # It runs the actual cloud storage application.
+  nextcloud:
+    image: kefaslungu/hng-nextcloud
+    restart: unless-stopped
+    depends_on:
+      - db
+    environment:
+      MYSQL_HOST: db
+      MYSQL_DATABASE: nextcloud
+      MYSQL_USER: nextcloud
+      MYSQL_PASSWORD: ${DB_PASSWORD:-changeme}
+      # Tell Nextcloud which host/IP is trusted to serve it (your VPS IP)
+      NEXTCLOUD_TRUSTED_DOMAINS: ${VPS_IP:-localhost}
+    volumes:
+      - nextcloud-data:/var/www/html
+      # Mount the nginx log volume read-only so Nextcloud can access logs if needed
+      - HNG-nginx-logs:/var/log/nginx:ro
+
+  # ─── Nginx (Reverse Proxy) ────────────────────────────────────────────────
+  # Nginx sits in front of Nextcloud and handles all incoming HTTP requests.
+  # It logs every request in JSON format to the shared HNG-nginx-logs volume.
+  # Your HOST nginx (with SSL) should proxy to this container on port 8080.
+  nginx:
+    image: nginx:alpine
+    restart: unless-stopped
+    depends_on:
+      - nextcloud
+    ports:
+      - "8080:80"   # Host port 8080 → container port 80
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro   # Our custom nginx config
+      - HNG-nginx-logs:/var/log/nginx                  # Nginx writes JSON logs here
+
+  # ─── Anomaly Detector Daemon ──────────────────────────────────────────────
+  # Our Python daemon that watches nginx logs and detects/blocks anomalies.
+  # It needs host networking so iptables commands affect the actual host firewall.
+  # It needs privileged mode so it can run iptables at all.
+  detector:
+    build: ./detector
+    restart: unless-stopped
+    depends_on:
+      - nginx
+    # host networking = the container shares the host's network stack.
+    # This is required so that iptables -I INPUT blocks traffic at the host level.
+    network_mode: host
+    # privileged = allows iptables commands to modify the kernel's firewall tables.
+    privileged: true
+    volumes:
+      - HNG-nginx-logs:/var/log/nginx:ro   # Read nginx logs written by the nginx container
+    environment:
+      # Slack webhook URL — can be set in .env file or passed directly
+      - SLACK_WEBHOOK_URL=${SLACK_WEBHOOK_URL:-}
