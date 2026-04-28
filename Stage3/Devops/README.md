@@ -135,8 +135,8 @@ sudo chmod +x /usr/local/bin/docker-compose
 
 ### 3. Clone the repo
 ```bash
-git clone https://github.com/YOUR_USERNAME/YOUR_REPO.git
-cd YOUR_REPO/Stage3/Devops
+git clone https://github.com/Godhanded/HNG14.git
+cd HNG14/Stage3/Devops
 ```
 
 ### 4. Configure environment
